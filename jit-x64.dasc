@@ -24,6 +24,7 @@
 
 int getMult(char *p);
 int detect_zeroloop(char *p);
+int detect_copyloop(char *p);
 
 int main(int argc, char *argv[])
 {
@@ -34,7 +35,8 @@ int main(int argc, char *argv[])
     unsigned int maxpc = 0;
     int pcstack[MAX_NESTING];
     int *top = pcstack, *limit = pcstack + MAX_NESTING;
-    int mult=0,minornum=0;
+    int mult=0;
+	int mnum=0;
 
     // Function prologue.
     |  push PTR
@@ -87,10 +89,10 @@ int main(int argc, char *argv[])
                 |  mov   byte [PTR], al
                 break;
             case '[':
-				minornum=detect_zeroloop(p);
-				if(minornum!=0)
+				mnum=detect_zeroloop(p);
+				if(mnum!=0)
 				{
-					p+=(minornum+1);
+					p+=2;
 					|  mov   byte [PTR], 0
 				}else
 				{
@@ -147,22 +149,25 @@ int getMult(char *p)
 
 int detect_zeroloop(char *p)
 {
+	p++;
+	if(*p!='-')
+		return 0;
+	p++;
+	if(*p!=']')
+		return 0;
+	
+	return 1;
+}
+
+int detect_copyloop(char *p)
+{
 	char *end=p;
 	int res=0;
+	p++;
+	if(*p!='-')
+		return 0;
 	while(*end!=']')
 		end++;
-	
-	p++;
-	while(p!=end)
-	{
-		if(*p!='-')
-			return 0;
-		else
-		{
-			p++;
-			res++;
-		}
-	}
 	
 	return res;
 }
