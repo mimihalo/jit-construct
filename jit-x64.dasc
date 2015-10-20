@@ -23,6 +23,7 @@
 #define MAX_NESTING 256
 
 int getMult(char *p);
+int detect_zeroloop(char *p);
 
 int main(int argc, char *argv[])
 {
@@ -33,7 +34,7 @@ int main(int argc, char *argv[])
     unsigned int maxpc = 0;
     int pcstack[MAX_NESTING];
     int *top = pcstack, *limit = pcstack + MAX_NESTING;
-    int mult=0;
+    int mult=0,minornum=0;
 
     // Function prologue.
     |  push PTR
@@ -86,16 +87,24 @@ int main(int argc, char *argv[])
                 |  mov   byte [PTR], al
                 break;
             case '[':
-                if (top == limit) err("Nesting too deep.");
-                // Each loop gets two pclabels: at the beginning and end.
-                // We store pclabel offsets in a stack to link the loop
-                // begin and end together.
-                maxpc += 2;
-                *top++ = maxpc;
-                dasm_growpc(&state, maxpc);
-                |  cmp  byte [PTR], 0
-                |  je   =>(maxpc-2)
-                |=>(maxpc-1):
+				minornum=detect_zeroloop(p);
+				if(minornum!=0)
+				{
+					p+=(minornum+1);
+					|  mov   byte [PTR], 0
+				}else
+				{
+					if (top == limit) err("Nesting too deep.");
+					// Each loop gets two pclabels: at the beginning and end.
+					// We store pclabel offsets in a stack to link the loop
+					// begin and end together.
+					maxpc += 2;
+					*top++ = maxpc;
+					dasm_growpc(&state, maxpc);
+					|  cmp  byte [PTR], 0
+					|  je   =>(maxpc-2)
+					|=>(maxpc-1):
+				}
                       break;
             case ']':
                 if (top == pcstack) err("Unmatched ']'");
@@ -134,4 +143,26 @@ int getMult(char *p)
         p++;
     }
     return res;
+}
+
+int detect_zeroloop(char *p)
+{
+	char *end=p;
+	int res=0;
+	while(*end!=']')
+		end++;
+	
+	p++;
+	while(p!=end)
+	{
+		if(*p!='-')
+			return 0;
+		else
+		{
+			p++;
+			res++;
+		}
+	}
+	
+	return res;
 }
