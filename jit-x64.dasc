@@ -97,7 +97,10 @@ int main(int argc, char *argv[])
 				{
 					p+=2;
 					|  mov   byte [PTR], 0
-				}else if(detect_copyloop(p)==0)
+				}else if((mnum=detect_copyloop(p))!=0)
+				{
+					p+=(mnum+1);
+				}else
 				{
 					if (top == limit) err("Nesting too deep.");
 					// Each loop gets two pclabels: at the beginning and end.
