@@ -25,11 +25,14 @@
 int getMult(char *p);
 int detect_zeroloop(char *p);
 int detect_copyloop(char *p);
+int check_cont(char *p,int num);
+
+dasm_State *state;
 
 int main(int argc, char *argv[])
 {
     if (argc < 2) err("Usage: jit-x64 <inputfile>");
-    dasm_State *state;
+    
     initjit(&state, actions);
 
     unsigned int maxpc = 0;
@@ -94,7 +97,7 @@ int main(int argc, char *argv[])
 				{
 					p+=2;
 					|  mov   byte [PTR], 0
-				}else
+				}else if(detect_copyloop(p)==0)
 				{
 					if (top == limit) err("Nesting too deep.");
 					// Each loop gets two pclabels: at the beginning and end.
@@ -161,13 +164,101 @@ int detect_zeroloop(char *p)
 
 int detect_copyloop(char *p)
 {
-	char *end=p;
-	int res=0;
+	char *start=p+1,*end=p;
+	int pinc=0,pdec=0;
+	int minc=0,mdec=0;
+	int res;
 	p++;
 	if(*p!='-')
 		return 0;
 	while(*end!=']')
+	{
+		if(*end=='[')
+			return 0;
 		end++;
+	}
+	
+	while(p!=end)
+	{
+		switch(*p)
+		{
+			case '>':
+				pinc++;
+				break;
+			case '<':
+				pdec++;
+				break;
+			case '+':
+				minc++;
+				break;
+			case '-':
+				mdec++;
+				break;
+			default:
+				return 0;
+		}
+		p++;
+	}
+	res=pinc+pdec+minc+mdec+1;
+	if(pinc!=pdec)
+		return 0;
+	if(minc>1 || mdec>1)
+		return 0;
+	
+	p=start+1;
+	if(*p=='>')
+	{
+		if(check_cont(p,pinc)!=0)
+		{
+			p+=pinc;
+			if(*p=='+')
+			{
+				| mov   cl , byte [PTR]
+				| add   byte [PTR+pinc], cl
+				| mov   byte [PTR], 0
+			}else
+			{
+				| mov   cl , byte [PTR]
+				| sub   byte [PTR+pinc], cl
+				| mov   byte [PTR], 0
+			}
+		}else
+		{
+			return 0;
+		}
+	}else if(*p=='<')
+	{
+		if(check_cont(p,pinc)!=0)
+		{
+			p+=pinc;
+			if(*p=='+')
+			{
+				| mov   cl , byte [PTR]
+				| add   byte [PTR-pinc], cl
+				| mov   byte [PTR], 0
+			}else
+			{
+				| mov   cl , byte [PTR]
+				| sub   byte [PTR-pinc], cl
+				| mov   byte [PTR], 0
+			}
+		}else
+		{
+			return 0;
+		}
+	}
 	
 	return res;
+}
+
+int check_cont(char *p,int num)
+{
+	char fc=*p;
+	for(int i=0;i<num;i++)
+	{
+		if(*p!=fc)
+			return 0;
+		p++;
+	}
+	return 1;
 }
