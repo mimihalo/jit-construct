@@ -12,83 +12,133 @@
 #define Dst &state
 #define MAX_NESTING 256
 
+int getMult(char *p);
+int detect_zeroloop(char *p);
+
 int main(int argc, char *argv[])
 {
-	if (argc < 2) err("Usage: jit-arm <inputfile>");
-	dasm_State *state;
-	initjit(&state, actions);
+    if (argc < 2) err("Usage: jit-arm <inputfile>");
+    dasm_State *state;
+    initjit(&state, actions);
 
-	unsigned int maxpc = 0;
-	int pcstack[MAX_NESTING];
-	int *top = pcstack, *limit = pcstack + MAX_NESTING;
+    unsigned int maxpc = 0;
+    int pcstack[MAX_NESTING];
+    int *top = pcstack, *limit = pcstack + MAX_NESTING;
+	int mult=0;
+	int mnum=0;
 
-	// Function prologue.
-	|  push {PTR, r5, r7, lr}
-	|  mov  PTR, r0
+    // Function prologue.
+    |  push {PTR, r5, r7, lr}
+    |  mov  PTR, r0
 
-	for (char *p = read_file(argv[1]); *p; p++) {
-		switch (*p) {
-		case '>':
-			|  add  PTR, PTR, #1
-			break;
-		case '<':
-			|  sub  PTR, PTR, #1
-			break;
-		case '+':
-			|  ldrb  r5, [PTR]
-			|  add   r5, r5, #1
-			|  strb  r5, [PTR]
-			break;
-		case '-':
-			|  ldrb  r5, [PTR]
-			|  sub   r5, r5, #1
-			|  strb  r5, [PTR]
-			break;
-		case '.':
-			|  mov r0, #1   // stdout
-			|  mov r1, PTR
-			|  mov r2, #1
-			|  mov r7, #4   // sys_write
-			|  svc #0
-			break;
-		case ',':
-			|  mov r0, #0   // stdin
-			|  mov r1, PTR
-			|  mov r2, #1
-			|  mov r7, #3   // sys_read
-			|  svc #0
-			break;
-		case '[':
-			if (top == limit) err("Nesting too deep.");
-			// Each loop gets two pclabels: at the beginning and end.
-			// We store pclabel offsets in a stack to link the loop
-			// begin and end together.
-			maxpc += 2;     // add two labels
-			*top++ = maxpc;
-			dasm_growpc(&state, maxpc);
-			|  ldrb  r5, [PTR]
-			|  cmp   r5, #0
-			|  beq   =>(maxpc-2)
-			|=>(maxpc-1):
-			break;
-		case ']':
-			if (top == pcstack) err("Unmatched ']'");
-			top--;
-			|  ldrb  r5, [PTR]
-			|  cmp   r5, #0
-			|  bne   =>(*top-1)
-			|=>(*top-2):
-			break;
-		}
-	}
+    for (char *p = read_file(argv[1]); *p; p++) {
+        switch (*p) {
+            case '>':
+				mult=getMult(p);
+                p+=(mult-1);
+                |  add  PTR, PTR, #mult
+                break;
+            case '<':
+                mult=getMult(p);
+                p+=(mult-1);
+                |  sub  PTR, PTR, #mult
+                break;
+            case '+':
+				mult=getMult(p);
+                p+=(mult-1);
+                |  ldrb  r5, [PTR]
+                |  add   r5, r5, #mult
+                |  strb  r5, [PTR]
+                break;
+            case '-':
+				mult=getMult(p);
+                p+=(mult-1);
+                |  ldrb  r5, [PTR]
+                |  sub   r5, r5, #mult
+                |  strb  r5, [PTR]
+                break;
+            case '.':
+                |  mov r0, #1   // stdout
+                |  mov r1, PTR
+                |  mov r2, #1
+                |  mov r7, #4   // sys_write
+                |  svc #0
+                break;
+            case ',':
+                |  mov r0, #0   // stdin
+                |  mov r1, PTR
+                |  mov r2, #1
+                |  mov r7, #3   // sys_read
+                |  svc #0
+                break;
+            case '[':
+				mnum=detect_zeroloop(p);
+				if(mnum!=0)
+				{
+					p+=2;
+					|  mov   r5, #0
+					|  strb  r5, [PTR]
+				}else
+				{
+					if (top == limit) err("Nesting too deep.");
+					// Each loop gets two pclabels: at the beginning and end.
+					// We store pclabel offsets in a stack to link the loop
+					// begin and end together.
+					maxpc += 2;     // add two labels
+					*top++ = maxpc;
+					dasm_growpc(&state, maxpc);
+					|  ldrb  r5, [PTR]
+					|  cmp   r5, #0
+					|  beq   =>(maxpc-2)
+					|=>(maxpc-1):
+				}
+                      break;
+            case ']':
+                if (top == pcstack) err("Unmatched ']'");
+                top--;
+                |  ldrb  r5, [PTR]
+                |  cmp   r5, #0
+                |  bne   =>(*top-1)
+                |=>(*top-2):
+                      break;
+        }
+    }
 
-	// Function epilogue.
-	|  pop  {PTR, r5, r7, pc}
+    // Function epilogue.
+    |  pop  {PTR, r5, r7, pc}
 
-	void (*fptr)(char*) = jitcode(&state);
-	char *mem = calloc(30000, 1);
-	fptr(mem);
-	free(mem);
-	free_jitcode(fptr);
-	return 0;
+    void (*fptr)(char*) = jitcode(&state);
+    char *mem = calloc(30000, 1);
+    fptr(mem);
+    free(mem);
+    free_jitcode(fptr);
+    return 0;
+}
+
+
+int getMult(char *p)
+{
+    char fc=*p;
+    int res=0;
+    while(*p) {
+        if(*p==fc) {
+            res++;
+        } else {
+            break;
+        }
+        p++;
+    }
+    return res;
+}
+
+int detect_zeroloop(char *p)
+{
+	p++;
+	if(*p!='-')
+		return 0;
+	p++;
+	if(*p!=']')
+		return 0;
+	
+	return 1;
 }
